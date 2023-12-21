@@ -5,6 +5,9 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow import DAG
 from airflow.models import Variable
+import sqlite3
+import pandas as pd
+
 
 # These args will get passed on to each operator
 # You can override them on a per-task basis during operator initialization
@@ -38,6 +41,23 @@ def export_final_answer():
     return None
 ## Do not change the code above this line-----------------------##
 
+def extract_order(**context):
+    con = sqlite3.connect("data/Northwind_small.sqlite")
+    df = pd.read_sql_query('SELECT * FROM "Order";', con)
+    df.to_csv(f"data/output_orders_{context['ds_nodash']}.csv")
+    con.close()
+
+def export_count(**context):
+    con = sqlite3.connect("data/Northwind_small.sqlite")
+    order_detail = pd.read_sql_query("SELECT * FROM OrderDetail;", con)
+    orders = pd.read_csv(f"data/output_orders_{context['ds_nodash']}.csv")
+    merged_dfs = pd.merge(order_detail, orders, how="inner", left_on="OrderId", right_on="Id")
+    filtered_df = merged_dfs.query('ShipCity == "Rio de Janeiro"')
+    count = str(filtered_df['Quantity'].sum())
+    with open("count.txt", 'w') as f:
+        f.write(count)
+    con.close()
+
 with DAG(
     'DesafioAirflow',
     default_args=default_args,
@@ -56,3 +76,18 @@ with DAG(
         python_callable=export_final_answer,
         provide_context=True
     )
+
+    extract_order_csv = PythonOperator(
+        task_id='extract_order_csv',
+        python_callable=extract_order,
+        provide_context=True
+    )
+
+    export_count_csv= PythonOperator(
+        task_id='export_count_csv',
+        python_callable=export_count,
+        provide_context=True
+    )
+
+extract_order_csv >> export_count_csv >> export_final_output
+
